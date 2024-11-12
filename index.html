@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Absensi dengan Face ID</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+
+        video {
+            border-radius: 8px;
+            display: block;
+            margin: 20px auto;
+            border: 2px solid #ccc;
+        }
+
+        button {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        form {
+            margin-top: 20px;
+        }
+
+        form input[type="text"],
+        form input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+        }
+
+        form button {
+            margin-top: 10px;
+        }
+
+        table {
+            width: 100%;
+            margin-top: 30px;
+            border-collapse: collapse;
+        }
+
+        table th, table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        table th {
+            background-color: #f2f2f2;
+        }
+
+        table td {
+            background-color: #fafafa;
+        }
+
+        .alert {
+            color: red;
+            font-weight: bold;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Sistem Absensi dengan Face ID</h1>
+        <video id="video" width="300" height="200" autoplay></video>
+        <button id="startCamera">Mulai Deteksi Wajah</button>
+        <canvas id="canvas"></canvas>
+
+        <form id="absen-form" style="display:none;">
+            <label for="nama">Nama:</label>
+            <input type="text" id="nama" required placeholder="Masukkan Nama">
+            
+            <label for="usia">Usia:</label>
+            <input type="number" id="usia" required placeholder="Masukkan Usia" min="1">
+            
+            <button type="submit">Absen</button>
+        </form>
+
+        <h2>Data Absensi</h2>
+        <table id="absen-table">
+            <thead>
+                <tr>
+                    <th>Nama</th>
+                    <th>Usia</th>
+                    <th>Waktu Absen</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Data absen akan muncul di sini -->
+            </tbody>
+        </table>
+
+        <div id="alertMessage" class="alert" style="display:none;"></div>
+    </div>
+
+    <!-- Include Face API.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+    <script>
+        let videoStream;
+        const absensiData = JSON.parse(localStorage.getItem('absensiData')) || [];
+
+        async function startCamera() {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const startButton = document.getElementById('startCamera');
+            const absenForm = document.getElementById('absen-form');
+
+            try {
+                // Start video stream
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: {} });
+                video.srcObject = videoStream;
+
+                // Wait for the video to load
+                await new Promise((resolve) => {
+                    video.onloadeddata = resolve;
+                });
+
+                // Show canvas to overlay on top of video
+                canvas.width = video.width;
+                canvas.height = video.height;
+
+                // Load Face API models
+                await faceapi.nets.ssdMobilenetv1.loadFromUri('/models');
+                await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+                await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+
+                startButton.style.display = 'none';
+                absenForm.style.display = 'block';
+                detectFace();
+            } catch (err) {
+                console.error("Error accessing camera: ", err);
+                alert("Tidak dapat mengakses kamera. Pastikan Anda memberikan izin kamera.");
+            }
+        }
+
+        // Function to detect faces
+        async function detectFace() {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const detections = await faceapi.detectAllFaces(video)
+                .withFaceLandmarks()
+                .withFaceDescriptors();
+
+            canvas?.clearRect(0, 0, canvas.width, canvas.height);
+            faceapi.matchDimensions(canvas, video);
+            const resizedDetections = faceapi.resizeResults(detections, video);
+            faceapi.draw.drawDetections(canvas, resizedDetections);
+            faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+
+            // If a face is detected, show absen form
+            if (detections.length > 0) {
+                const form = document.getElementById('absen-form');
+                form.style.display = 'block';
+            }
+
+            // Keep detecting every 100ms
+            setTimeout(detectFace, 100);
+        }
+
+        document.getElementById('startCamera').addEventListener('click', startCamera);
+
+        // Handle absensi form submission
+        document.getElementById('absen-form').addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            const nama = document.getElementById('nama').value.trim();
+            const usia = document.getElementById('usia').value.trim();
+            if (!nama || !usia) {
+                showAlert('Nama dan Usia tidak boleh kosong!');
+                return;
+            }
+
+            const waktuAbsen = new Date().toLocaleString();
+            absensiData.push({ nama, usia, waktuAbsen });
+            localStorage.setItem('absensiData', JSON.stringify(absensiData));
+            document.getElementById('nama').value = '';
+            document.getElementById('usia').value = '';
+
+            // Tampilkan absensi terbaru
+            tampilkanAbsensi();
+        });
+
+        // Display absensi data
+        function tampilkanAbsensi() {
+            const tabel = document.getElementById('absen-table').getElementsByTagName('tbody')[0];
+            tabel.innerHTML = '';
+            absensiData.forEach(item => {
+                const row = tabel.insertRow();
+                const cell1 = row.insertCell(0);
+                const cell2 = row.insertCell(1);
+                const cell3 = row.insertCell(2);
+                cell1.textContent = item.nama;
+                cell2.textContent = item.usia;
+                cell3.textContent = item.waktuAbsen;
+            });
+        }
+
+        // Show alert message
+        function showAlert(message) {
+            const alertMessage = document.getElementById('alertMessage');
+            alertMessage.style.display = 'block';
+            alertMessage.textContent = message;
+            setTimeout(() => {
+                alertMessage.style.display = 'none';
+            }, 3000);
+        }
+
+        // Load and display saved absensi
+        window.onload = function() {
+            tampilkanAbsensi();
+        }
+    </script>
+</body>
+</html>
